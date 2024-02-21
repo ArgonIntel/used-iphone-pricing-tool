@@ -3,6 +3,12 @@
 > ## Disclaimer:
 > This is only for educational purposes as the source of data is Njuskalo.hr and they do not allow legally scraping data from their website.
 
+## How to use
+
+Demo data are available in `\pricing-tool\data\`
+
+Jupyter notebook with Data analytics is available in `\pricing-tool\data_analytics.ipynb`
+
 ### The whole purpose of completing such a project was to test the hypothesis of how data collected from online ads are correlated and if based on data such as 
 1. iPhone model 
 2. ROM size 
@@ -45,3 +51,5 @@ Looking at density plots of actual vs predicted prices based on input informatio
 The prices of used iPhones were mostly determined based on Model and Rom size. Also, a huge influence had a subjective perception of other factors such as the cosmetic condition of particular phone. 
 
 Models prediction of the price based on input information could give an objective estimate of the price range and could help in spotting a good opportunity to buy the used phone and then resell it for a profit
+
+
