@@ -1,4 +1,4 @@
-from scraper.scraper import get_data_from_url
+#from scraper.scraper import get_data_from_url
 from scraper.cleaner import cleaner
 from datetime import datetime
 import pandas as pd

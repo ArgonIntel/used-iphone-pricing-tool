@@ -1,3 +1,4 @@
+
 import pandas as pd
 
 
@@ -25,7 +26,7 @@ def clean_number_column(column):
     return column
 
 
-def cleaner(content):
+def clean_data(content):
     df = pd.DataFrame.from_dict(content)
     try:
         text_columns = ["store_private", "ad_description", "ad_title"]

@@ -1,160 +1,123 @@
 import pandas as pd
-import glob
 import os
+from abc import ABC, abstractmethod
 
-def concatinate_dfs(dfs: list[pd.DataFrame]) -> pd.DataFrame:
-    """Concatinates DataFrames into one. Multiple Dataframes are result of
-    multiple .csv files
+class DataLoader(ABC):
+    @abstractmethod
+    def load_data(self, path: str) -> list[pd.DataFrame]:
+        pass
 
-    Args:
-        dfs (list[pd.DataFrame]): _description_
+class CSVDataLoader(DataLoader):
+    def load_data(self, path: str) -> list[pd.DataFrame]:
+        df_list = []
+        csv_files = [os.path.join(path, file) for file in os.listdir(path) if file.endswith('.csv')]
+        for filename in csv_files:
+            df_list.append(pd.read_csv(filename))
+        return df_list
 
-    Returns:
-        pd.DataFrame: _description_
-    """
-    dataframe = pd.concat(dfs, ignore_index=True)
-    dataframe.drop(["Unnamed: 0"], axis=1, inplace=True)
+class DataProcessor:
+    def __init__(self, loader=CSVDataLoader()):
+        self.loader = loader
+        self.invalid_data = {"models": 0,
+                             "roms": 0,
+                             "battery": 0,
+                             "locked": 0}
 
-    return dataframe
+    def process_data(self, path: str) -> pd.DataFrame:
+        dfs = self.loader.load_data(path)
+        concatenated_df = self._concatenate_dfs(dfs)
+        processed_df = self._get_useful_data_from_raw(concatenated_df)
+        return processed_df
 
+    def _concatenate_dfs(self, dfs: list[pd.DataFrame]) -> pd.DataFrame:
+        """Concatenates DataFrames into one. Multiple Dataframes are result of
+        multiple .csv files
 
-def drop_shop(dataframe: pd.DataFrame) -> pd.DataFrame:
-    """Returns only rows advertised by individuals and omiting shop ads
-    Args:
-        dataframe (pd.DataFrame): _description_
+        Args:
+            dfs (list[pd.DataFrame]): List of DataFrames
 
-    Returns:
-        pd.DataFrame: _description_
-    """
-    return dataframe.drop(
-        index=dataframe[
-            dataframe["store_private"].str.contains("trgovine")
-        ].index,
-        axis=0,
-    )
+        Returns:
+            pd.DataFrame: Concatenated DataFrame
+        """
+        dataframe = pd.concat(dfs, ignore_index=True)
+        dataframe.drop(["Unnamed: 0"], axis=1, inplace=True)
 
+        return dataframe
 
-def create_text_series(dataframe: pd.DataFrame) -> pd.Series:
-    """Concatinates Ad title and Ad description into pd.Series
+    def _extract_data_from_text(self, text_series: pd.Series) -> pd.DataFrame:
+        """Extracts data such as iPhone model, ROM size, Battery health, locked status
+        warranty information from Text of the ad
 
-    Args:
-        dataframe (pd.DataFrame): _description_
+        Args:
+            text_series (pd.Series): _description_
 
-    Returns:
-        pd.Series: _description_
-    """
-    text_series = pd.Series()
-    text_series = dataframe["ad_title"] + " " + dataframe["ad_description"]
+        Returns:
+            pd.DataFrame: _description_
+        """
+        pipeline_data = pd.DataFrame()
+        pipeline_data["model"] = text_series.str.extract(
+            r".phone\s?(\d{2}\s?(?:pro\s)?(?:max)?)", expand=True
+        )
+        pipeline_data["model"].replace(to_replace=" ", value="", regex=True, inplace=True)
+        pipeline_data["rom"] = text_series.str.extract(r"(\d{2,3})\s?gb", expand=True)
+        pipeline_data["battery"] = text_series.str.extract(r"(\d{2,3})\s?%", expand=True)
+        pipeline_data["warranty"] = text_series.str.contains(
+            r"garanc", regex=True
+        ) & ~text_series.str.contains(r"istekla", regex=True)
+        pipeline_data["locked"] = text_series.str.contains(r"zakljucan", regex=True)
+        return pipeline_data
 
-    return text_series
+    def _manage_na_values(self, dataframe: pd.DataFrame) -> pd.DataFrame:
+        """manages missing values in the DataFrame and also removes rows with
+        irrelevant data
 
+        Args:
+            dataframe (pd.DataFrame): Dataframe to be cleaned
 
-def drop_trash(pipeline: pd.DataFrame) -> pd.DataFrame:
-    """Returns a dataframe without useless rows such as locked phones
+        Returns:
+            pd.DataFrame: _description_
+        """
+        models = ['11', 
+          '11pro', 
+          '11promax', 
+          '12', 
+          '12pro', 
+          '12promax', 
+          '13', 
+          '13pro', 
+          '13promax', 
+          '14', 
+          '14pro', 
+          '14promax']
+        roms = ['64', '128', '256', '512']
+        
+        dataframe["model"].ffill(inplace=True)
+        dataframe["rom"] = dataframe["rom"].fillna(dataframe["rom"].mode().iloc[0])
+        df_len = len(dataframe)
+        dataframe = dataframe[dataframe["model"].isin(models)]
+        self.invalid_data["models"] += df_len - len(dataframe)
+        df_len = len(dataframe)
+        dataframe = dataframe[dataframe["rom"].isin(roms)]
+        self.invalid_data["roms"] += df_len - len(dataframe)
+        df_len = len(dataframe)
+        dataframe = dataframe[~dataframe["battery"].isna()]
+        self.invalid_data["battery"] += df_len - len(dataframe)
+        return dataframe.reset_index(drop=True)
 
-    Args:
-        pipeline (pd.DataFrame): _description_
+    def _get_useful_data_from_raw(self, raw_dataframe: pd.DataFrame) -> pd.DataFrame:
+        """Main function of the cleaning module and handles each operation 
 
-    Returns:
-        pd.DataFrame: _description_
-    """
-    pipeline.dropna(subset=["rom"], inplace=True)
-    pipeline.drop(
-        index=pipeline[pipeline["locked"] == True].index, axis=0, inplace=True
-    )
-    return pipeline
+        Args:
+            dataframe (pd.DataFrame): Scpared data ready for cleaning.
 
-
-def extract_data(text_series: pd.Series) -> pd.DataFrame:
-    """Extracts data such as iPhone model, ROM size, Battery health, locked status
-    warranty information from Text of the ad
-
-    Args:
-        text_series (pd.Series): _description_
-
-    Returns:
-        pd.DataFrame: _description_
-    """
-    pipeline_data = pd.DataFrame()
-    pipeline_data["model"] = text_series.str.extract(
-        r".phone\s?(\d{2}\s?(?:pro)?\s?(?:max)?)", expand=True
-    )
-    pipeline_data["model"].replace(to_replace=" ", value="", regex=True, inplace=True)
-    pipeline_data["rom"] = text_series.str.extract(r"(\d{2,3})\s?gb", expand=True)
-    pipeline_data["battery"] = text_series.str.extract(r"(\d{2,3})\s?%", expand=True)
-    pipeline_data["warranty"] = text_series.str.contains(
-        r"garanc", regex=True
-    ) & ~text_series.str.contains(r"istekla", regex=True)
-    pipeline_data["locked"] = text_series.str.contains(r"zakljucan", regex=True)
-    return pipeline_data
-
-
-def drop_nas(dataframe: pd.DataFrame) -> pd.DataFrame:
-    """Drops all NaN rows from DataFrame
-
-    Args:
-        dataframe (pd.DataFrame): _description_
-
-    Returns:
-        pd.DataFrame: _description_
-    """
-    dataframe.dropna(subset=["rom"], inplace=True)
-    dataframe.drop(
-        index=dataframe[dataframe["battery"].isna()].index, axis=0, inplace=True
-    )
-    return dataframe
-
-
-def type_to_int(dataframe: pd.DataFrame) -> pd.DataFrame:
-    """Converts battery and rom columns into "int"
-
-    Args:
-        dataframe (pd.DataFrame): 
-
-    Returns:
-        pd.DataFrame: 
-    """
-    dataframe["battery"] = dataframe["battery"].astype("int")
-    dataframe["rom"] = dataframe["rom"].astype("int")
-
-    return dataframe
-
-
-def info_extractor(raw_data: pd.DataFrame) -> pd.DataFrame:
-    """Main function of the cleaning module and handles each operation 
-
-    Args:
-        raw_data (pd.DataFrame): Scpared data ready for cleaning.
-
-    Returns:
-        pd.DataFrame: DataFrame with all useful data for further analysis
-    """
-    raw_data = drop_shop(raw_data)
-    text_series = create_text_series(raw_data)
-    pipeline = extract_data(text_series)
-    pipeline["price"] = raw_data["price"]
-    pipeline = drop_trash(pipeline)
-    pipeline = drop_nas(pipeline)
-    pipeline = type_to_int(pipeline)
-    return pipeline
-
-
-def load_from_csv(path: str) -> list[pd.DataFrame]:
-    """Loading multiple .csv files into a Dataframe
-
-    Args:
-        filenames (list[str]): List of file paths
-
-    Returns:
-        list[pd.DataFrame]: List of dataframes reflecting .csv files
-    """
-    df_list = []
-    current_path = os.getcwd()
-    os.chdir(path)
-    print(os.getcwd())
-    csv_files = glob.glob(os.path.join(path, "*.csv"))
-    for filename in csv_files:
-        df_list.append(pd.read_csv(filename))
-    os.chdir(current_path)
-    return df_list
-
+        Returns:
+            pd.DataFrame: DataFrame with all useful data for further analysis
+        """
+        raw_dataframe = raw_dataframe[~raw_dataframe["store_private"].str.contains("trgovine")]
+        text_series = raw_dataframe["ad_title"] + " " + raw_dataframe["ad_description"]
+        pipeline = self._extract_data_from_text(text_series)
+        pipeline["price"] = raw_dataframe["price"].astype("int")
+        pipeline = pipeline[pipeline["locked"] == False]
+        pipeline = self._manage_na_values(pipeline)
+        pipeline["battery"] = pipeline["battery"].astype("int")
+        return pipeline
